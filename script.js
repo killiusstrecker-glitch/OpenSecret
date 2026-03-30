@@ -614,7 +614,7 @@ function startIntroAnimation(onComplete) {
         [baseTexts[i], baseTexts[j]] = [baseTexts[j], baseTexts[i]];
     }
 
-    const fontSize = 16;
+    const fontSize = 19.2; // 放大 1.2 倍
     const lineHeight = fontSize * 1.25;
     const cols = Math.ceil(iCanvas.width / fontSize);
     const rows = Math.ceil(iCanvas.height / lineHeight);
@@ -713,11 +713,16 @@ function startIntroAnimation(onComplete) {
 
     let wave2StartTime = wave1MaxEnd + 200; 
     let maxRevealTime = 0;
+    let wave2Offsets = {}; // 用来存储第二波每一段独立的随机偏移时间
 
     grid.forEach(cell => {
         let st = 0;
         if (cell.wave === 2) {
-            let chunkDelay = (cell.chunkId % 50) * 30; // maximum 1.5s staggered ripple
+            if (wave2Offsets[cell.chunkId] === undefined) {
+                // 完全随机赋予 0~2 秒的起始延时，打破顶部向下的僵硬瀑布规律
+                wave2Offsets[cell.chunkId] = Math.random() * 2000;
+            }
+            let chunkDelay = wave2Offsets[cell.chunkId];
             st = wave2StartTime + chunkDelay;
         }
         let revTime = st + cell.charOffset * TYPE_SPEED + Math.random() * 20; 
