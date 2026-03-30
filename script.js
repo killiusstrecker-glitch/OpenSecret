@@ -67,7 +67,9 @@ function updateLoading() {
     if(prog) prog.innerText = `${loadedCount} / ${totalAssets}`;
     if(loadedCount >= totalAssets) {
         document.getElementById('loading').style.display = 'none';
-        initApp();
+        startIntroAnimation(() => {
+            initApp();
+        });
     }
 }
 
@@ -181,69 +183,23 @@ class Entity {
         this.gx = gx;
         this.gy = gy;
         
-        // 初始位置将改为在 initApp 中设定
-        this.tx = 0;
-        this.ty = 0;
-        
-        this.state = 'intro_wait'; 
+        this.state = 'idle'; 
         this.hoverTime = 0;
         this.particles = [];
         this.uploaded = false;
         
         this.typewriterProgress = 0;
-        this.introScale = 0.7; // 文字独立大小比例
         
         this.curTextScale = 1;
         this.curTextOpacity = 0;
-        this.curTextX = this.tx;
-        this.curTextY = this.ty;
+        this.curTextX = this.gx;
+        this.curTextY = this.gy - GUY_SIZE/2 - 20;
         this.curGuyOpacity = 0.2;
         this.isTarget = false;
     }
     
     update(t) {
         if(this.state === 'dissolved') return; 
-        
-        // Phase 1: 开场动画 (打字出现，接着飞向小人中心点)
-        let introTypeDuration = 4000; // 时间缩短，速度提高20% (要求2)
-        let introHoldDuration = 2000; 
-        let introFlyDuration = 3000;
-
-        if(t <= introTypeDuration) {
-            this.state = 'intro_wait';
-            this.curTextOpacity = 1.0; 
-            this.curGuyOpacity = 0.0; // 打字时隐藏小主体
-            this.curTextScale = this.introScale; // 应用专属放大倍率
-            this.typewriterProgress = t / introTypeDuration;
-            this.curTextX = this.tx;
-            this.curTextY = this.ty;
-        } 
-        else if(t <= introTypeDuration + introHoldDuration) {
-            this.state = 'intro_wait';
-            this.curTextOpacity = 1.0; 
-            this.curGuyOpacity = (t - introTypeDuration) / introHoldDuration * 0.2; // 逐渐显现小人
-            this.curTextScale = this.introScale;
-            this.typewriterProgress = 1.0;
-            this.curTextX = this.tx;
-            this.curTextY = this.ty;
-        } 
-        else if(t <= introTypeDuration + introHoldDuration + introFlyDuration) {
-            this.state = 'intro_move';
-            this.typewriterProgress = 1.0;
-            let progress = (t - (introTypeDuration + introHoldDuration)) / introFlyDuration;
-            let ease = progress < 0.5 ? 2 * progress * progress : 1 - Math.pow(-2 * progress + 2, 2) / 2;
-            this.curTextX = this.tx + (this.gx - this.tx) * ease; 
-            this.curTextY = this.ty + (this.gy - this.ty) * ease;
-            this.curTextScale = this.introScale * (1 - ease); 
-            this.curTextOpacity = 1 - ease; 
-            this.curGuyOpacity = 0.2;
-        } 
-        else if(this.state === 'intro_move' || this.state === 'intro_wait') {
-            this.state = 'idle';
-            this.curTextOpacity = 0;
-            this.typewriterProgress = 0.0;
-            this.curGuyOpacity = 0.2;
-        }
         
         // Phase 2: 交互与探照灯
         if(this.state === 'idle' || this.state === 'active') {
@@ -487,75 +443,6 @@ function generateDensePositions(count) {
     return positions;
 }
 
-// 要求3：完全废弃正圆形排斥导致的“蜂巢整齐感”，改用真实的文本矩形碰撞(AABB)算法来实现文字穿插随机排版
-function generateDensePositionsText() {
-    let positions = [];
-    const spawnWidth = CANVAS_WIDTH * 0.98; // 拓展为 98% 边界，防止极度拥挤
-    const spawnHeight = CANVAS_HEIGHT * 0.98;
-    const offsetX = (CANVAS_WIDTH - spawnWidth) / 2;
-    const offsetY = (CANVAS_HEIGHT - spawnHeight) / 2;
-
-    for(let i=1; i<=TOTAL_ENTITIES; i++) {
-        let txtImg = textImgs[i];
-        
-        let imgW = txtImg && txtImg.width ? txtImg.width : 250;
-        let imgH = txtImg && txtImg.height ? txtImg.height : 50;
-
-        // 要求2：统一并且固定文本的巨大尺寸，彻底取消各个文本之间的随机大小差异变化
-        let baseScale = 0.85; 
-        
-        // 允许字与字的检测边界发生肉眼不可见的极微小重叠（因为文字Canvas内部自带大量透明Padding，就算边界重叠，里面文字绝对不会重叠，且能让排版更紧凑密实防重叠）
-        let padX = -5;  
-        let padY = -5; 
-
-        let placed = false;
-        let bestX = 0, bestY = 0;
-        
-        let curScale = baseScale;
-        let w = imgW * curScale;
-        let h = imgH * curScale;
-
-        // 极限压缩寻址：由于字体彻底统一变大，屏幕空间会极其狭小拥挤。加大寻址次数到 15000 次死磕相同尺寸找空位
-        for (let shrinkRound = 0; shrinkRound < 2; shrinkRound++) {
-            for (let attempts = 0; attempts < 15000; attempts++) {
-                let rndX = offsetX + w/2 + Math.random() * (spawnWidth - w);
-                let rndY = offsetY + h/2 + Math.random() * (spawnHeight - h);
-                
-                let overlap = false;
-                for(let j = 0; j < positions.length; j++) {
-                    let p2 = positions[j];
-                    if (Math.abs(rndX - p2.x) < (w/2 + p2.w/2 + padX) && 
-                        Math.abs(rndY - p2.y) < (h/2 + p2.h/2 + padY)) {
-                        overlap = true;
-                        break;
-                    }
-                }
-                if (!overlap) {
-                    bestX = rndX;
-                    bestY = rndY;
-                    placed = true;
-                    break;
-                }
-            }
-            if(placed) break;
-            
-            // 实在放不下，稍微缩小尺寸再来
-            curScale *= 0.85;
-            w = imgW * curScale;
-            h = imgH * curScale;
-        }
-
-        if(!placed) { // 最终托底
-            bestX = offsetX + w/2 + Math.random() * (spawnWidth - w);
-            bestY = offsetY + h/2 + Math.random() * (spawnHeight - h);
-        }
-        
-        positions.push({ x: bestX, y: bestY, w: w, h: h, scale: curScale });
-    }
-    return positions;
-}
-
-
 function initApp() {
     appStartTime = performance.now();
     let posArray = generateDensePositions(TOTAL_ENTITIES);
@@ -588,17 +475,9 @@ function initApp() {
         pool.splice(pool.indexOf(bestType), 1);
     }
     
-    // 采用专为文本设计的矩形重叠保护算法，使得文本随机穿插、错落有致但绝不重叠
-    let textIntroLayout = generateDensePositionsText();
-    
     for(let i=1; i<=TOTAL_ENTITIES; i++) {
         let pos = posArray[i-1];
         let ent = new Entity(i, pos.x, pos.y, pos.templateIdx);
-        ent.tx = textIntroLayout[i-1].x;
-        ent.ty = textIntroLayout[i-1].y;
-        ent.introScale = textIntroLayout[i-1].scale;
-        ent.curTextX = ent.tx;
-        ent.curTextY = ent.ty;
         entities.push(ent);
     }
     requestAnimationFrame(loop);
@@ -615,7 +494,7 @@ function loop(timestamp) {
     // 找出探照灯范围内距离中心最近的唯一一个小人
     let closestEnt = null;
     let minDist = 90; // 要求：只有探照灯中心鼠标实际触碰到小人身上（由于小人大小为180，故半径为90以内才算触碰）
-    if (t > 9000 && !isAnyBusy) { // 现在的总时长改为9秒
+    if (!isAnyBusy) {
         for(let ent of entities) {
             if (ent.state === 'idle' || ent.state === 'active') {
                 let dist = Math.sqrt(Math.pow(mx - ent.gx, 2) + Math.pow(my - ent.gy, 2));
@@ -634,41 +513,39 @@ function loop(timestamp) {
         ent.drawGuy(ctx, t);
     }
     
-    // 中间层：开场动画之后再绘制探照灯遮罩
-    if (t > 9000) {
-        document.body.style.cursor = 'none'; // 仅在互动开始时隐藏真实指针
-        overlayCtx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT); 
-        overlayCtx.globalCompositeOperation = 'source-over';
-        overlayCtx.fillStyle = 'rgba(0,0,0,0.85)'; 
-        overlayCtx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-        
-        overlayCtx.globalCompositeOperation = 'destination-out';
-        let grad = overlayCtx.createRadialGradient(mx, my, 0, mx, my, 250); 
-        grad.addColorStop(0, 'rgba(255,255,255,1)');
-        grad.addColorStop(0.5, 'rgba(255,255,255,0.5)');
-        grad.addColorStop(1, 'rgba(255,255,255,0)');
-        overlayCtx.fillStyle = grad;
-        overlayCtx.beginPath();
-        overlayCtx.arc(mx, my, 250, 0, Math.PI*2);
-        overlayCtx.fill();
-        
-        ctx.drawImage(overlayCanvas, 0, 0);
+    // 中间层：绘制探照灯遮罩
+    document.body.style.cursor = 'none'; // 隐藏真实指针
+    overlayCtx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT); 
+    overlayCtx.globalCompositeOperation = 'source-over';
+    overlayCtx.fillStyle = 'rgba(0,0,0,0.85)'; 
+    overlayCtx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+    
+    overlayCtx.globalCompositeOperation = 'destination-out';
+    let grad = overlayCtx.createRadialGradient(mx, my, 0, mx, my, 250); 
+    grad.addColorStop(0, 'rgba(255,255,255,1)');
+    grad.addColorStop(0.5, 'rgba(255,255,255,0.5)');
+    grad.addColorStop(1, 'rgba(255,255,255,0)');
+    overlayCtx.fillStyle = grad;
+    overlayCtx.beginPath();
+    overlayCtx.arc(mx, my, 250, 0, Math.PI*2);
+    overlayCtx.fill();
+    
+    ctx.drawImage(overlayCanvas, 0, 0);
 
-        ctx.globalCompositeOperation = 'screen'; 
-        let lightGrad = ctx.createRadialGradient(mx, my, 0, mx, my, 250);
-        lightGrad.addColorStop(0, 'rgba(60, 65, 75, 0.35)'); 
-        lightGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
-        ctx.fillStyle = lightGrad;
-        ctx.beginPath();
-        ctx.arc(mx, my, 250, 0, Math.PI*2);
-        ctx.fill();
-        ctx.globalCompositeOperation = 'source-over'; 
+    ctx.globalCompositeOperation = 'screen'; 
+    let lightGrad = ctx.createRadialGradient(mx, my, 0, mx, my, 250);
+    lightGrad.addColorStop(0, 'rgba(60, 65, 75, 0.35)'); 
+    lightGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    ctx.fillStyle = lightGrad;
+    ctx.beginPath();
+    ctx.arc(mx, my, 250, 0, Math.PI*2);
+    ctx.fill();
+    ctx.globalCompositeOperation = 'source-over'; 
 
-        ctx.fillStyle = 'rgba(0, 242, 255, 0.8)';
-        ctx.beginPath();
-        ctx.arc(mx, my, 3, 0, Math.PI*2);
-        ctx.fill();
-    }
+    ctx.fillStyle = 'rgba(0, 242, 255, 0.8)';
+    ctx.beginPath();
+    ctx.arc(mx, my, 3, 0, Math.PI*2);
+    ctx.fill();
     
     // 顶层渲染：画文字和全图粒子散落（位于手电筒之上）
     for(let ent of entities) {
@@ -710,4 +587,350 @@ function uploadToTD(imgElement) {
     })
     .then(res => console.log('✅ 文本图片已投递至 TD'))
     .catch(err => console.error('传输失败:', err));
+}
+
+// ---------------- 5. 独立全屏开场动画 ----------------
+function startIntroAnimation(onComplete) {
+    const iCanvas = document.getElementById('introCanvas');
+    if (!iCanvas) {
+        if(onComplete) onComplete();
+        return;
+    }
+    iCanvas.width = window.innerWidth;
+    iCanvas.height = window.innerHeight;
+    const iCtx = iCanvas.getContext('2d', { alpha: false }); // optimise
+
+    // 1. Prepare texts
+    let baseTexts = window.openSecretTexts && window.openSecretTexts.length > 0 ? 
+                    [...window.openSecretTexts] : 
+                    Array(50).fill("在这个被数字洪流淹没的时代我们每天都在产生大量信息碎片化却很难拼凑出一个完整的秘密");
+    
+    // Clean each string
+    baseTexts = baseTexts.map(t => t.replace(/[^\u4e00-\u9fa5]/g, ''));
+    
+    // Shuffle the 50 sentences (NOT the characters)
+    for (let i = baseTexts.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [baseTexts[i], baseTexts[j]] = [baseTexts[j], baseTexts[i]];
+    }
+
+    const fontSize = 16;
+    const lineHeight = fontSize * 1.25;
+    const cols = Math.ceil(iCanvas.width / fontSize);
+    const rows = Math.ceil(iCanvas.height / lineHeight);
+    const totalCells = cols * rows;
+
+    let gridArray = new Array(totalCells).fill(null);
+    const TYPE_SPEED = 40; // 40ms per char
+    let maxWave1Time = 0;
+    let maxWave2Time = 0;
+
+    // 1(a). Wave 1: Randomly place the initial 50 texts
+    for (let i = 0; i < baseTexts.length; i++) {
+        let str = baseTexts[i];
+        if (!str) str = "秘密";
+        let placed = false;
+        let attempts = 0;
+        
+        while (!placed && attempts < 2000) {
+            let startIdx = Math.floor(Math.random() * (totalCells - str.length));
+            let overlap = false;
+            for (let k = 0; k < str.length; k++) {
+                if (gridArray[startIdx + k] !== null) {
+                    overlap = true;
+                    break;
+                }
+            }
+            if (!overlap) {
+                for (let k = 0; k < str.length; k++) {
+                    gridArray[startIdx + k] = { char: str[k], wave: 1, charOffset: k };
+                }
+                placed = true;
+            }
+            attempts++;
+        }
+        
+        // Fallback sequentially if randomly failing
+        if (!placed) {
+            for (let j = 0; j <= totalCells - str.length; j++) {
+                let overlap = false;
+                for (let k = 0; k < str.length; k++) {
+                    if (gridArray[j + k] !== null) { overlap = true; break; }
+                }
+                if (!overlap) {
+                    for (let k = 0; k < str.length; k++) {
+                        gridArray[j + k] = { char: str[k], wave: 1, charOffset: k };
+                    }
+                    placed = true;
+                    break;
+                }
+            }
+        }
+    }
+
+    // 1(b). Wave 2: Fill remaining holes consecutively
+    let textIdx = baseTexts.length;
+    let charOffset = 0;
+    let currentStr = baseTexts[textIdx % baseTexts.length];
+    let chunkId = 0;
+    
+    for (let i = 0; i < totalCells; i++) {
+        if (gridArray[i] === null) {
+            if (!currentStr) currentStr = "秘密";
+            gridArray[i] = { char: currentStr[charOffset], wave: 2, charOffset: charOffset, chunkId: chunkId };
+            charOffset++;
+            if (charOffset >= currentStr.length) {
+                charOffset = 0;
+                textIdx++;
+                chunkId++;
+                currentStr = baseTexts[textIdx % baseTexts.length];
+            }
+        }
+    }
+
+    let grid = [];
+    let wave1MaxEnd = 0;
+    gridArray.forEach((data, idx) => {
+        let row = Math.floor(idx / cols);
+        let col = idx % cols;
+        let duration = data.charOffset * TYPE_SPEED;
+        if (data.wave === 1 && duration > wave1MaxEnd) wave1MaxEnd = duration;
+
+        grid.push({
+            x: col * fontSize,
+            y: row * lineHeight,
+            char: data.char, // This acts as the rendered character, which can swap
+            originChar: data.char, // Keep track if we need it
+            state: 0,
+            isSecret: false,
+            flickerTimer: 0,
+            nearIntensity: 0,
+            wave: data.wave,             
+            charOffset: data.charOffset,
+            chunkId: data.chunkId || 0
+        });
+    });
+
+    let wave2StartTime = wave1MaxEnd + 200; 
+    let maxRevealTime = 0;
+
+    grid.forEach(cell => {
+        let st = 0;
+        if (cell.wave === 2) {
+            let chunkDelay = (cell.chunkId % 50) * 30; // maximum 1.5s staggered ripple
+            st = wave2StartTime + chunkDelay;
+        }
+        let revTime = st + cell.charOffset * TYPE_SPEED + Math.random() * 20; 
+        cell.revealTime = revTime;
+        cell.cursorTime = revTime + Math.max(TYPE_SPEED, 80); 
+        
+        if (cell.cursorTime > maxRevealTime) maxRevealTime = cell.cursorTime;
+    });
+    
+    const P1_DYN = maxRevealTime + 300; 
+    
+    const allCharsPool = baseTexts.join(''); // Used for random garbling later
+
+    // 2. Secret Mask Canvas Map (Aura & Exact)
+    const maskCanvas = document.createElement('canvas');
+    maskCanvas.width = iCanvas.width;
+    maskCanvas.height = iCanvas.height;
+    const mCtx = maskCanvas.getContext('2d');
+    
+    mCtx.fillStyle = '#000000';
+    mCtx.fillRect(0, 0, maskCanvas.width, maskCanvas.height);
+    
+    mCtx.globalCompositeOperation = 'lighter';
+    mCtx.textAlign = 'center';
+    mCtx.textBaseline = 'middle';
+    
+    let secretFontSize = Math.min(iCanvas.width / 4, 300);
+    // 使用更圆滑的字体组合，同时用 stroke 发胖
+    mCtx.font = `bold ${secretFontSize}px "Arial Rounded MT Bold", "Varela Round", "Nunito", "Quicksand", "PingFang SC", sans-serif`;
+    mCtx.lineJoin = "round";
+    mCtx.lineCap = "round";
+    mCtx.lineWidth = secretFontSize * 0.08;
+    
+    let letterSpacing = secretFontSize > 150 ? "10px" : "auto";
+    mCtx.letterSpacing = letterSpacing;
+    
+    // 渲染附近光晕 (Green Channel)
+    mCtx.shadowColor = '#00FF00';
+    mCtx.shadowBlur = Math.floor(secretFontSize * 0.4);
+    mCtx.fillStyle = '#00FF00';
+    mCtx.strokeStyle = '#00FF00';
+    mCtx.fillText("SECRET", iCanvas.width / 2, iCanvas.height / 2);
+    mCtx.strokeText("SECRET", iCanvas.width / 2, iCanvas.height / 2);
+
+    // 渲染精确字体实体 (Red Channel)
+    mCtx.shadowBlur = 0;
+    mCtx.fillStyle = '#FF0000';
+    mCtx.strokeStyle = '#FF0000';
+    mCtx.fillText("SECRET", iCanvas.width / 2, iCanvas.height / 2);
+    mCtx.strokeText("SECRET", iCanvas.width / 2, iCanvas.height / 2);
+    
+    const imgData = mCtx.getImageData(0, 0, maskCanvas.width, maskCanvas.height).data;
+    
+    grid.forEach(cell => {
+        const px = Math.floor(cell.x + fontSize / 2);
+        const py = Math.floor(cell.y + fontSize / 2);
+        if (px >= 0 && px < iCanvas.width && py >= 0 && py < iCanvas.height) {
+            const index = (py * iCanvas.width + px) * 4;
+            let r = imgData[index];
+            let g = imgData[index + 1];
+            if (r > 128) { // Red channel threshold for exact word
+                cell.isSecret = true;
+            }
+            cell.nearIntensity = g / 255.0; // Green channel for near field blur
+        }
+    });
+
+    // 3. Animation Loop
+    const P1 = P1_DYN; // 第一阶段动态总时长，保证全部并发文本打完
+    const P2 = P1 + 4500; // 第二阶段：让 1,2,3 个字慢慢闪烁有充足时间
+    const P3 = P2 + 4000; // 第三阶段：寻找 SECRET 轮廓
+    const HOLD_DUR = 4000; // 第四阶段前半部分：全亮保持 4 秒，让人看清楚字
+    const FADE_DUR = 2500; // 第四阶段后半部分：缓缓淡出黑屏 2.5 秒
+    const P4 = P3 + HOLD_DUR + FADE_DUR; 
+    let startTime = performance.now();
+    
+    function render(time) {
+        const elapsed = time - startTime;
+        let phase = 1;
+        if (elapsed > P3) phase = 4;
+        else if (elapsed > P2) phase = 3;
+        else if (elapsed > P1) phase = 2;
+
+        if (elapsed > P4) {
+            iCanvas.style.display = 'none';
+            return; // 彻底停止动画循环
+        }
+
+        if (phase === 4) {
+            if (!window.introFading) {
+                window.introFading = true;
+                // 利用 CSS transition-delay 属性实现完美的停留机制
+                iCanvas.style.transition = `opacity ${FADE_DUR / 1000}s ease-in-out ${HOLD_DUR / 1000}s`;
+                iCanvas.style.opacity = '0';
+                
+                setTimeout(() => {
+                    setTimeout(() => {
+                        if(onComplete) onComplete(); // 在屏幕彻底暗下 P4 结束后，额外等待 0.5 秒再开启交互
+                    }, 500);
+                }, HOLD_DUR + FADE_DUR);
+            }
+            // 刻意不 return，让 Canvas 在 CSS 淡出的同时继续渲染乱码字符保持动态！
+        }
+
+        iCtx.fillStyle = '#000000';
+        iCtx.fillRect(0, 0, iCanvas.width, iCanvas.height);
+        
+        iCtx.font = `${fontSize}px "PingFang SC", "Microsoft YaHei", sans-serif`;
+        iCtx.textBaseline = 'top';
+        iCtx.textAlign = 'left';
+
+        const colorDark = '#333333';
+        const colorWhite = '#FFFFFF';
+
+        grid.forEach((cell, index) => {
+            if (phase === 1) {
+                if (elapsed < cell.revealTime) {
+                    return; // 未打字状态保持纯黑
+                }
+                if (elapsed < cell.cursorTime) {
+                    if (cell.wave === 1 || cell.chunkId % 3 !== 0) {
+                        iCtx.fillStyle = colorWhite;
+                        iCtx.fillText("█", cell.x, cell.y); // 恢复初段打字机约 2 倍数量的光标
+                    } else {
+                        // 其余文本隐秘出现，防止屏幕白框密度过于饱和
+                        iCtx.fillStyle = colorDark;
+                        iCtx.fillText(cell.char, cell.x, cell.y); 
+                    }
+                    return;
+                }
+            }
+
+            // Garbled matrix text effect from Phase 2 to Phase 4
+            if (phase >= 2) {
+                if (phase === 4) {
+                    if (cell.isSecret) {
+                        cell.state = 2; 
+                    } else {
+                        if (cell.state === 2) cell.state = 0; // 解除非核心像素的锁定
+                        
+                        // 在最后黑屏前，仅在 SECRET 轮廓“附近/光晕内”加上随机微弱闪光
+                        if (cell.state === 0 && cell.nearIntensity > 0.02 && Math.random() < cell.nearIntensity * 0.004) {
+                            cell.state = 1;
+                            cell.flickerTimer = 100 + Math.random() * 400;
+                        }
+                    }
+                }
+                
+                if (Math.random() < 0.04) { // 全局持续乱码，包括已锁定的白光 SECRET 内部字符
+                    cell.char = allCharsPool[Math.floor(Math.random() * allCharsPool.length)];
+                }
+            }
+
+            // Update flicker life timer
+            if (cell.flickerTimer > 0) {
+                cell.flickerTimer -= 16.6;
+            } else if (cell.state === 1) {
+                cell.state = 0;
+            }
+
+            if (phase === 2) {
+                const p2Progress = (elapsed - P1) / (P2 - P1);
+                // 1. 慢慢增加闪烁数量 (1 -> 150)
+                const targetFlickers = 1 + 150 * Math.pow(p2Progress, 3);
+                const avgLife = 300; 
+                const prob = (targetFlickers / grid.length) * (16.6 / avgLife);
+                
+                if (cell.state === 0 && Math.random() < prob) {
+                    cell.state = 1;
+                    cell.flickerTimer = 100 + Math.random() * 400; // 发亮时间更长更平缓
+                }
+            } else if (phase === 3) {
+                const p3Elapsed = elapsed - P2;
+                const p3Progress = Math.min(p3Elapsed / (P3 - P2), 1.0);
+                
+                // 2. 背景随机闪烁快速衰减至 0
+                const bgProb = (200 / grid.length) * (16.6 / 300) * Math.max(0, 1 - p3Progress * 2.5);
+                
+                // 3. 附近字闪烁增强，伴随抛物线起伏
+                const nearPeak = Math.max(0, Math.sin(p3Progress * Math.PI)); 
+                const nearProb = cell.nearIntensity * 0.08 * nearPeak; 
+                
+                const firingProb = bgProb + nearProb;
+                
+                if (cell.isSecret) {
+                    // Lock chance increases at the end of phase 3
+                    const lockThreshold = 0.5 + Math.random() * 0.5;
+                    if (p3Progress > lockThreshold) {
+                        cell.state = 2; // Locked shape
+                    } else {
+                        if (cell.state === 0 && Math.random() < firingProb + 0.05 * p3Progress) {
+                            cell.state = 1;
+                            cell.flickerTimer = 100 + Math.random() * 300;
+                        }
+                    }
+                } else {
+                    if (cell.state === 0 && Math.random() < firingProb) {
+                        cell.state = 1;
+                        cell.flickerTimer = 100 + Math.random() * 300;
+                    }
+                }
+            }
+            
+            if (cell.state === 2 || cell.state === 1) {
+                iCtx.fillStyle = colorWhite;
+            } else {
+                iCtx.fillStyle = colorDark;
+            }
+            iCtx.fillText(cell.char, cell.x, cell.y);
+        });
+
+        requestAnimationFrame(render);
+    }
+    
+    requestAnimationFrame(render);
 }
