@@ -98,6 +98,10 @@ for(let i=1; i<=5; i++){
     }
 }
 
+// 2. 加载手电筒图标 (聚光灯效果右下角装饰)
+const lightenImg = new Image();
+lightenImg.src = 'img/Lighten.png';
+
 function createTextCanvas(text) {
     // 1. 去除文字前面的序号和标点符号
     text = text.replace(/^\d+[\.\、\s]+/, '');
@@ -174,6 +178,8 @@ console.log("成功加载了文本！总计文本数量：", lines.length);
 
 let entities = [];
 let appStartTime = 0;
+let isRestarting = false;
+let restartAlpha = 0;
 
 class Entity {
     constructor(id, gx, gy, templateIdx) {
@@ -444,6 +450,7 @@ function generateDensePositions(count) {
 }
 
 function initApp() {
+    entities = [];
     appStartTime = performance.now();
     let posArray = generateDensePositions(TOTAL_ENTITIES);
     
@@ -485,32 +492,55 @@ function initApp() {
 
 function loop(timestamp) {
     let t = timestamp - appStartTime;
+    
+    let triggeredEntities = entities.filter(e => e.uploaded);
+    // 当照射 6 个小人并消散后，开始渐渐暗下来
+    if (!isRestarting && entities.length > 0 && triggeredEntities.length >= 6 && triggeredEntities.every(e => e.state === 'dissolved')) {
+        isRestarting = true;
+    }
+
+    if (isRestarting) {
+        restartAlpha += 0.008; // 减慢渐暗速度
+        if (restartAlpha >= 1) {
+            restartAlpha = 1;
+            // 彻底变黑后，清理并重启
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+            overlayCtx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+            
+            entities = [];
+            isRestarting = false;
+            restartAlpha = 0;
+            document.body.style.cursor = 'default';
+            
+            // 间隔 1.0 秒后重新播放
+            setTimeout(() => {
+                startIntroAnimation(() => {
+                    initApp();
+                });
+            }, 1000);
+            
+            return;
+        }
+    }
+
     ctx.fillStyle = '#000000';
     ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
     
-    // 判定是否有任何小人正在展示文字或消散，如果有，则屏蔽其他交互
-    let isAnyBusy = entities.some(e => e.state === 'text_show' || e.state === 'dissolving');
-
-    // 找出探照灯范围内距离中心最近的唯一一个小人
-    let closestEnt = null;
-    let minDist = 90; // 要求：只有探照灯中心鼠标实际触碰到小人身上（由于小人大小为180，故半径为90以内才算触碰）
-    if (!isAnyBusy) {
-        for(let ent of entities) {
-            if (ent.state === 'idle' || ent.state === 'active') {
-                let dist = Math.sqrt(Math.pow(mx - ent.gx, 2) + Math.pow(my - ent.gy, 2));
-                if (dist < minDist) {
-                    minDist = dist;
-                    closestEnt = ent;
-                }
+    // 首层渲染：画小人（未产生文本的那些）
+    for(let ent of entities) {
+        ent.isTarget = false;
+        if (ent.state === 'idle' || ent.state === 'active') {
+            let dist = Math.sqrt(Math.pow(mx - ent.gx, 2) + Math.pow(my - ent.gy, 2));
+            if (dist < 90) { // 手电筒中心照射到才能反应
+                ent.isTarget = true;
             }
         }
-    }
-    
-    // 首层渲染：画小人
-    for(let ent of entities) {
-        ent.isTarget = (ent === closestEnt);
         ent.update(t);
-        ent.drawGuy(ctx, t);
+        // 还没产生文本的小人画在黑幕底层，受手电筒光影和遮罩影响
+        if (ent.state === 'idle' || ent.state === 'active') {
+            ent.drawGuy(ctx, t);
+        }
     }
     
     // 中间层：绘制探照灯遮罩
@@ -521,9 +551,11 @@ function loop(timestamp) {
     overlayCtx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
     
     overlayCtx.globalCompositeOperation = 'destination-out';
+    // 半径改回 250（不扩大范围），光晕过渡更加柔滑，但让核心区域保持高亮度
     let grad = overlayCtx.createRadialGradient(mx, my, 0, mx, my, 250); 
     grad.addColorStop(0, 'rgba(255,255,255,1)');
-    grad.addColorStop(0.5, 'rgba(255,255,255,0.5)');
+    grad.addColorStop(0.4, 'rgba(255,255,255,0.9)'); 
+    grad.addColorStop(0.7, 'rgba(255,255,255,0.3)'); 
     grad.addColorStop(1, 'rgba(255,255,255,0)');
     overlayCtx.fillStyle = grad;
     overlayCtx.beginPath();
@@ -533,8 +565,10 @@ function loop(timestamp) {
     ctx.drawImage(overlayCanvas, 0, 0);
 
     ctx.globalCompositeOperation = 'screen'; 
+    // 回归正常白色，同时显著调低 Alpha 亮度值使光效更柔和低调
     let lightGrad = ctx.createRadialGradient(mx, my, 0, mx, my, 250);
-    lightGrad.addColorStop(0, 'rgba(60, 65, 75, 0.35)'); 
+    lightGrad.addColorStop(0, 'rgba(255, 255, 255, 0.3)'); // 调低 Alpha 使白光中心更灰暗柔和
+    lightGrad.addColorStop(0.5, 'rgba(120, 120, 120, 0.1)'); // 显著减弱过渡层感
     lightGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
     ctx.fillStyle = lightGrad;
     ctx.beginPath();
@@ -542,17 +576,35 @@ function loop(timestamp) {
     ctx.fill();
     ctx.globalCompositeOperation = 'source-over'; 
 
-    ctx.fillStyle = 'rgba(0, 242, 255, 0.8)';
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.3)'; // 中心点同步显著降亮
     ctx.beginPath();
     ctx.arc(mx, my, 3, 0, Math.PI*2);
     ctx.fill();
     
-    // 顶层渲染：画文字和全图粒子散落（位于手电筒之上）
+    // 顶层渲染：画文字、豁免黑幕的小人，和粒子散落（位于手电筒遮罩之上）
     for(let ent of entities) {
+        if (ent.state === 'text_show' || ent.state === 'dissolving') {
+            ent.drawGuy(ctx, t); // 产生文本后的小人画在最顶层，手电筒移开也能完全看清！
+        }
         ent.drawText(ctx, t);
         if(ent.state === 'dissolving') {
             ent.drawParticles(ctx);
         }
+    }
+
+    // 如果正在重启，在此处叠一层逐渐变黑的遮层
+    if (isRestarting) {
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.fillStyle = `rgba(0, 0, 0, ${restartAlpha})`;
+        ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+    }
+
+    // 渲染手电筒图标 (靠近手电筒中心一点，约在以前位置的一半处)
+    if (lightenImg.complete) {
+        const iconSize = 100; 
+        // 放置在探照灯中心的右下方，距离减半 (140 -> 70)，更靠近核心光束
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.drawImage(lightenImg, mx + 70, my + 70, iconSize, iconSize);
     }
 
     requestAnimationFrame(loop);
@@ -596,6 +648,10 @@ function startIntroAnimation(onComplete) {
         if(onComplete) onComplete();
         return;
     }
+    iCanvas.style.display = 'block';
+    iCanvas.style.opacity = '1';
+    iCanvas.style.transition = 'none';
+    window.introFading = false;
     iCanvas.width = window.innerWidth;
     iCanvas.height = window.innerHeight;
     const iCtx = iCanvas.getContext('2d', { alpha: false }); // optimise
