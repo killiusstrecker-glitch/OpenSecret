@@ -84,6 +84,30 @@ const fallbackGuyInfo = createFallbackGuy('rgba(255,255,255,0.2)');
 
 let loadedCount = 0;
 const totalAssets = 6 + 50; // Updated to 6 static images + 50 text canvases
+function playVideoTransition(filename, onComplete) {
+    const gv = document.getElementById('globalVideo');
+    if (!gv) {
+        if (onComplete) onComplete();
+        return;
+    }
+    gv.src = `video/${filename}`;
+    gv.style.display = 'block';
+    
+    // 自动播放处理：某些浏览器需要静音或交互
+    gv.muted = false; 
+    gv.play().catch(e => {
+        console.warn("Autoplay was blocked or failed", e);
+        gv.muted = true;
+        gv.play();
+    });
+    
+    gv.onended = () => {
+        gv.style.display = 'none';
+        gv.onended = null;
+        if (onComplete) onComplete();
+    };
+}
+
 function updateLoading() {
     loadedCount++;
     const prog = document.getElementById('progress');
@@ -92,14 +116,29 @@ function updateLoading() {
     if(progBar) progBar.style.width = `${(loadedCount / totalAssets) * 100}%`;
     
     if(loadedCount >= totalAssets) {
-        const loader = document.getElementById('loading');
-        loader.style.opacity = '0';
-        setTimeout(() => {
-            loader.style.display = 'none';
-            startIntroAnimation(() => {
-                initApp();
-            });
-        }, 800);
+        const startBtn = document.getElementById('startBtn');
+        const progText = document.getElementById('progress');
+        const barContainer = document.querySelector('.loading-bar-container');
+        
+        // 当资源加载完毕，隐藏进度条，显示开始按钮
+        if(progText) progText.style.display = 'none';
+        if(barContainer) barContainer.style.display = 'none';
+        if(startBtn) {
+            startBtn.style.display = 'block';
+            startBtn.onclick = () => {
+                const loader = document.getElementById('loading');
+                loader.style.opacity = '0';
+                setTimeout(() => {
+                    loader.style.display = 'none';
+                    // 用户交互后播放开头视频，声音将被允许播放
+                    playVideoTransition('kaitou.mp4', () => {
+                        startIntroAnimation(() => {
+                            initApp();
+                        });
+                    });
+                }, 800);
+            };
+        }
     }
 }
 
@@ -533,12 +572,17 @@ function loop(timestamp) {
             isAnyAnimating = false; // 重置全局锁
             document.body.style.cursor = 'default';
             
-            // 间隔 1.0 秒后重新播放
+            // 间隔 1.0 秒后重新播放视频 'jiewei' 然后重头开始
             setTimeout(() => {
-                startIntroAnimation(() => {
-                    initApp();
+                playVideoTransition('jiewei.mov_tmp', () => {
+                    // 结案视频播完后，按用户要求重新播放开头视频 'kaitou'
+                    playVideoTransition('kaitou.mp4', () => {
+                        startIntroAnimation(() => {
+                            initApp();
+                        });
+                    });
                 });
-            }, 1000);
+            }, 500);
             
             return;
         }

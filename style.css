@@ -96,3 +96,38 @@ body, html {
     font-size: 0.75rem;
     letter-spacing: 0.05rem;
 }
+
+#globalVideo {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    object-fit: cover;
+    z-index: 200;
+    background: black;
+}
+
+#startBtn {
+    background: transparent;
+    color: #00f2ff;
+    border: 1px solid #00f2ff;
+    padding: 1rem 2rem;
+    font-size: 0.9rem;
+    letter-spacing: 0.3rem;
+    cursor: pointer;
+    border-radius: 4px;
+    box-shadow: 0 0 15px rgba(0, 242, 255, 0.3);
+    transition: all 0.3s ease;
+    margin-top: 1rem;
+    position: relative;
+    z-index: 110;
+    font-family: inherit;
+    text-transform: uppercase;
+}
+
+#startBtn:hover {
+    background: rgba(0, 242, 255, 0.1);
+    box-shadow: 0 0 35px rgba(0, 242, 255, 0.6);
+    transform: scale(1.05);
+}
