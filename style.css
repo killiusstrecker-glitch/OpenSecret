@@ -5,7 +5,7 @@ body, html {
     height: 100vh;
     background-color: #000000;
     overflow: hidden;
-    font-family: 'Inter', sans-serif;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     color: #fff;
 }
 
@@ -27,22 +27,72 @@ body, html {
 
 #loading {
     position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    text-align: center;
-    z-index: 10;
-    font-family: monospace;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    background: radial-gradient(circle at center, #0a0a0f 0%, #000000 100%);
+    z-index: 100;
+    transition: opacity 0.8s ease-in-out;
+}
+
+#loading::before {
+    content: '';
+    position: absolute;
+    width: 300px;
+    height: 300px;
+    background: radial-gradient(circle, rgba(0, 242, 255, 0.05) 0%, transparent 70%);
+    animation: pulse 4s infinite ease-in-out;
+}
+
+@keyframes pulse {
+    0%, 100% { transform: scale(1); opacity: 0.3; }
+    50% { transform: scale(1.5); opacity: 0.7; }
 }
 
 #loading h2 {
-    font-size: 2rem;
-    margin-bottom: 1rem;
+    font-size: 1.5rem;
+    font-weight: 300;
+    letter-spacing: 0.4rem;
+    margin-bottom: 2rem;
     color: #00f2ff;
+    text-shadow: 0 0 20px rgba(0, 242, 255, 0.5);
+    text-transform: uppercase;
+}
+
+.loading-bar-container {
+    width: 240px;
+    height: 2px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+    overflow: hidden;
+    margin-bottom: 1rem;
+    position: relative;
+}
+
+#progress-bar {
+    width: 0%;
+    height: 100%;
+    background: linear-gradient(90deg, #00f2ff, #0072ff);
+    box-shadow: 0 0 10px rgba(0, 242, 255, 0.8);
+    transition: width 0.3s ease-out;
+}
+
+#progress {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.8rem;
+    color: #8e8e9c;
+    letter-spacing: 0.1rem;
 }
 
 .hint {
-    color: #8e8e9c;
-    font-size: 0.9rem;
-    margin-top: 1rem;
+    position: absolute;
+    bottom: 3rem;
+    color: #4a4a5a;
+    font-size: 0.75rem;
+    letter-spacing: 0.05rem;
 }

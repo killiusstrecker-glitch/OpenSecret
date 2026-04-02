@@ -25,6 +25,28 @@ document.addEventListener('mousemove', (e) => {
     my = e.clientY;
 });
 
+// Handle window resize
+window.addEventListener('resize', () => {
+    const oldWidth = canvas.width;
+    const oldHeight = canvas.height;
+    const newWidth = window.innerWidth;
+    const newHeight = window.innerHeight;
+    
+    canvas.width = newWidth;
+    canvas.height = newHeight;
+    overlayCanvas.width = newWidth;
+    overlayCanvas.height = newHeight;
+    
+    if (entities.length > 0) {
+        entities.forEach(ent => {
+            ent.gx = (ent.gx / oldWidth) * newWidth;
+            ent.gy = (ent.gy / oldHeight) * newHeight;
+            ent.curTextX = (ent.curTextX / oldWidth) * newWidth;
+            ent.curTextY = (ent.curTextY / oldHeight) * newHeight;
+        });
+    }
+});
+
 // 资产字典
 const staticImgs = {};
 const activeFrames = {}; // 改用数组存储序列帧
@@ -33,10 +55,11 @@ const textImgs = {};
 // 用户定义的每套动画帧名称列表
 const animConfig = {
     1: ['1j', '1jj'],
-    2: ['2j', '2jj', '2jjjj'], // 严格遵循您提供的结构
+    2: ['2j', '2jj', '2jjjj'], 
     3: ['3j', '3jj', '3jjjj'],
     4: ['4j', '4jj', '4jjj', '4jjjj', '4jjjjj', '4jjjjjj'], 
-    5: ['5j', '5jj', '5jjjj']
+    5: ['5j', '5jj', '5jjjj'],
+    6: ['6j', '6jj', '6jjj', '6jjjj'] // Added 6th entity config
 };
 
 function createFallbackText() {
@@ -60,21 +83,28 @@ const fallbackTextInfo = createFallbackText();
 const fallbackGuyInfo = createFallbackGuy('rgba(255,255,255,0.2)');
 
 let loadedCount = 0;
-const totalAssets = 5 + 50; // 去除 GIF 的强制进度计数，让序列帧异步后台加载
+const totalAssets = 6 + 50; // Updated to 6 static images + 50 text canvases
 function updateLoading() {
     loadedCount++;
     const prog = document.getElementById('progress');
+    const progBar = document.getElementById('progress-bar');
     if(prog) prog.innerText = `${loadedCount} / ${totalAssets}`;
+    if(progBar) progBar.style.width = `${(loadedCount / totalAssets) * 100}%`;
+    
     if(loadedCount >= totalAssets) {
-        document.getElementById('loading').style.display = 'none';
-        startIntroAnimation(() => {
-            initApp();
-        });
+        const loader = document.getElementById('loading');
+        loader.style.opacity = '0';
+        setTimeout(() => {
+            loader.style.display = 'none';
+            startIntroAnimation(() => {
+                initApp();
+            });
+        }, 800);
     }
 }
 
 // 1. 加载资源
-for(let i=1; i<=5; i++){
+for(let i=1; i<=6; i++){
     let img = new Image();
     img.onload = () => { staticImgs[i] = img; updateLoading(); };
     img.onerror = () => {
@@ -180,11 +210,12 @@ let entities = [];
 let appStartTime = 0;
 let isRestarting = false;
 let restartAlpha = 0;
+let isAnyAnimating = false; // 全局锁：确保同一时间只有一个小人在进行文本/消散动画
 
 class Entity {
     constructor(id, gx, gy, templateIdx) {
         this.id = id;
-        this.templateIdx = templateIdx || (Math.floor(Math.random() * 5) + 1); 
+        this.templateIdx = templateIdx || (Math.floor(Math.random() * 6) + 1); 
         
         this.gx = gx;
         this.gy = gy;
@@ -216,17 +247,24 @@ class Entity {
                     this.state = 'active';
                     this.curGuyOpacity = 1.0; 
                 }
-                this.hoverTime += 16.6; // 以60帧计算增量
-                if(this.hoverTime >= 3000) {
-                    this.state = 'text_show';
-                    this.typewriterProgress = 0.0; // 重置进度，开始回显得打字机效果
-                    this.textShowStartTime = t;
-                    if(!this.uploaded) {
-                        this.uploaded = true;
-                        uploadToTD(textImgs[this.id]);
-                        document.body.style.transform = `translate(${Math.random()*4-2}px, ${Math.random()*4-2}px)`; 
-                        setTimeout(() => document.body.style.transform = `none`, 100);
+                
+                // 只有当全局没有其他小人在播放动画时，才累加 hover 时间
+                if (!isAnyAnimating) {
+                    this.hoverTime += 16.6; 
+                    if(this.hoverTime >= 3000) {
+                        this.state = 'text_show';
+                        isAnyAnimating = true; // 锁定全局，防止其他小人同时开启
+                        this.textShowStartTime = t;
+                        if(!this.uploaded) {
+                            this.uploaded = true;
+                            uploadToTD(textImgs[this.id]);
+                            document.body.style.transform = `translate(${Math.random()*4-2}px, ${Math.random()*4-2}px)`; 
+                            setTimeout(() => document.body.style.transform = `none`, 100);
+                        }
                     }
+                } else {
+                    // 如果全局有锁，hover 时间清零，防止在后台偷偷累加
+                    this.hoverTime = 0;
                 }
             } else {
                 this.state = 'idle';
@@ -235,31 +273,46 @@ class Entity {
             }
         }
         
-        // Phase 3: 文本回显 (动态呈现打字机)
+        // Phase 3: 文本动画 (缩放出现 -> 停留 -> 缩放消失)
         if(this.state === 'text_show') {
             let passed = t - this.textShowStartTime;
             this.curGuyOpacity = 1.0;
             
-            // 文本打字效果 2 秒
-            let showP = Math.min(passed / 2000, 1.0); 
-            this.typewriterProgress = showP;
-            this.curTextOpacity = 1.0;
-            this.curTextScale = 1.0;
-            this.curTextX = this.gx;
-            this.curTextY = this.gy - GUY_SIZE/2 - 20; 
-            
-            // 要求1：当文字所有都出现了之后，再停留1秒，然后再消失（2000打字 + 1000停留 = 3000）
-            if(passed >= 3000) {
+            const SCALE_UP_DUR = 800;    // 快速放大
+            const HOLD_DUR = 1000;       // 停留 1 秒
+            const FADE_DUR = 1200;       // 放大并由于渐隐消失
+
+            if (passed < SCALE_UP_DUR) {
+                // 1. 从特别小慢慢放大到正常大小
+                let p = passed / SCALE_UP_DUR;
+                // 使用 easeOutExpo 效果让出现更具冲击力
+                let easeP = 1 - Math.pow(2, -10 * p);
+                this.curTextScale = 0.05 + 0.95 * easeP; 
+                this.curTextOpacity = 1.0;
+            } else if (passed < SCALE_UP_DUR + HOLD_DUR) {
+                // 2. 到正常大小之后停留
+                this.curTextScale = 1.0;
+                this.curTextOpacity = 1.0;
+            } else if (passed < SCALE_UP_DUR + HOLD_DUR + FADE_DUR) {
+                // 3. 渐渐放大（两倍左右）并隐隐消失
+                let p = (passed - (SCALE_UP_DUR + HOLD_DUR)) / FADE_DUR;
+                this.curTextScale = 1.0 + 1.0 * p; // 到 2.0 倍
+                this.curTextOpacity = 1.0 - p;     // 渐隐
+            } else {
                 this.state = 'dissolving';
+                this.curTextOpacity = 0; // 确保完全消失后不再出现
                 this.dissolveStartTime = t;
                 this.createParticles();
             }
+            
+            this.curTextX = this.gx;
+            this.curTextY = this.gy - GUY_SIZE/2 - 20; 
         }
         
         // Phase 4: 粒子消散
         if(this.state === 'dissolving') {
+            this.curTextOpacity = 0; // 保持彻底消失
             let passed = t - this.dissolveStartTime;
-            this.curTextOpacity = Math.max(0, 1.0 - passed/1000); 
             
             let allDead = true;
             for(let p of this.particles) {
@@ -270,7 +323,10 @@ class Entity {
                 p.alpha -= 0.015;  
                 if(p.alpha > 0) allDead = false;
             }
-            if(allDead) this.state = 'dissolved';
+            if(allDead) {
+                this.state = 'dissolved';
+                isAnyAnimating = false; // 解除全局锁，允许下一个小人开始
+            }
         }
     }
     
@@ -339,7 +395,7 @@ class Entity {
     drawText(ctx, t) {
         if(this.state === 'dissolved') return;
         
-        // 渲染文本图片 (完全按照原图比例与尺寸，动态剥离文字打字机渲染)
+        // 渲染文本图片 (根据 curTextScale 动态缩放渲染)
         if(this.curTextOpacity > 0) {
             let txtImg = textImgs[this.id];
             if(txtImg && txtImg.width) {
@@ -347,45 +403,8 @@ class Entity {
                 let w = txtImg.width * this.curTextScale;
                 let h = txtImg.height * this.curTextScale;
                 
-                if (txtImg.fullText && this.typewriterProgress !== undefined) {
-                    let totalChars = txtImg.fullText.length;
-                    let charsToShow = Math.floor(this.typewriterProgress * totalChars);
-                    
-                    if (charsToShow > 0) {
-                        ctx.save();
-                        const fontSize = 18 * this.curTextScale;
-                        const lineHeight = 28 * this.curTextScale;
-                        const paddingX = 20 * this.curTextScale;
-                        const paddingY = 20 * this.curTextScale;
-                        
-                        ctx.font = `${fontSize}px "Inter", "Microsoft YaHei", sans-serif`;
-                        ctx.textBaseline = 'top';
-                        ctx.textAlign = 'left';
-                        ctx.shadowColor = 'rgba(0, 0, 0, 0.8)';
-                        ctx.shadowBlur = 8 * this.curTextScale;
-                        ctx.shadowOffsetX = 0;
-                        ctx.shadowOffsetY = 2 * this.curTextScale;
-                        ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
-                        
-                        let charAssigned = 0;
-                        for (let i = 0; i < txtImg.textLines.length; i++) {
-                            let lineStr = txtImg.textLines[i];
-                            if (charAssigned + lineStr.length <= charsToShow) {
-                                ctx.fillText(lineStr, this.curTextX - w/2 + paddingX, this.curTextY - h/2 + paddingY + i * lineHeight);
-                                charAssigned += lineStr.length;
-                            } else {
-                                let remain = charsToShow - charAssigned;
-                                if (remain > 0) {
-                                   ctx.fillText(lineStr.substring(0, remain), this.curTextX - w/2 + paddingX, this.curTextY - h/2 + paddingY + i * lineHeight);
-                                }
-                                break;
-                            }
-                        }
-                        ctx.restore();
-                    }
-                } else {
-                    ctx.drawImage(txtImg, this.curTextX - w/2, this.curTextY - h/2, w, h);
-                }
+                // 直接绘制整个文本 Canvas，不再使用逐字打字机效果，以支持整体缩放
+                ctx.drawImage(txtImg, this.curTextX - w/2, this.curTextY - h/2, w, h);
                 ctx.globalAlpha = 1.0;
             }
         }
@@ -456,8 +475,8 @@ function initApp() {
     
     // 保证每个类别的数量完全平均，并通过贪心算法分离同类，防止同种类扎堆
     let pool = [];
-    for(let i=1; i<=5; i++) {
-        for(let j=0; j < Math.ceil(TOTAL_ENTITIES / 5); j++) pool.push(i);
+    for(let i=1; i<=6; i++) {
+        for(let j=0; j < Math.ceil(TOTAL_ENTITIES / 6); j++) pool.push(i);
     }
     
     for(let i=0; i<posArray.length; i++) {
@@ -511,6 +530,7 @@ function loop(timestamp) {
             entities = [];
             isRestarting = false;
             restartAlpha = 0;
+            isAnyAnimating = false; // 重置全局锁
             document.body.style.cursor = 'default';
             
             // 间隔 1.0 秒后重新播放
@@ -532,7 +552,7 @@ function loop(timestamp) {
         ent.isTarget = false;
         if (ent.state === 'idle' || ent.state === 'active') {
             let dist = Math.sqrt(Math.pow(mx - ent.gx, 2) + Math.pow(my - ent.gy, 2));
-            if (dist < 90) { // 手电筒中心照射到才能反应
+            if (dist < 60) { // 缩小半径后，触发判定范围也相应缩小
                 ent.isTarget = true;
             }
         }
@@ -547,39 +567,33 @@ function loop(timestamp) {
     document.body.style.cursor = 'none'; // 隐藏真实指针
     overlayCtx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT); 
     overlayCtx.globalCompositeOperation = 'source-over';
-    overlayCtx.fillStyle = 'rgba(0,0,0,0.85)'; 
+    overlayCtx.fillStyle = 'rgba(0,0,0,0.98)'; // 维持背景极暗，但稍微透一点点底，保持空间感
     overlayCtx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
     
     overlayCtx.globalCompositeOperation = 'destination-out';
-    // 半径改回 250（不扩大范围），光晕过渡更加柔滑，但让核心区域保持高亮度
-    let grad = overlayCtx.createRadialGradient(mx, my, 0, mx, my, 250); 
+    const RAD = 125;
+    let grad = overlayCtx.createRadialGradient(mx, my, 0, mx, my, RAD); 
     grad.addColorStop(0, 'rgba(255,255,255,1)');
-    grad.addColorStop(0.4, 'rgba(255,255,255,0.9)'); 
-    grad.addColorStop(0.7, 'rgba(255,255,255,0.3)'); 
+    grad.addColorStop(0.9, 'rgba(255,255,255,1)'); // 在 90% 的位置开始羽化，保持清晰边缘的同时也有一点柔和
     grad.addColorStop(1, 'rgba(255,255,255,0)');
     overlayCtx.fillStyle = grad;
     overlayCtx.beginPath();
-    overlayCtx.arc(mx, my, 250, 0, Math.PI*2);
+    overlayCtx.arc(mx, my, RAD, 0, Math.PI*2);
     overlayCtx.fill();
     
     ctx.drawImage(overlayCanvas, 0, 0);
 
+    // 重新加入极微弱的 screen 亮感，用来显示光束的“边际”
     ctx.globalCompositeOperation = 'screen'; 
-    // 回归正常白色，同时显著调低 Alpha 亮度值使光效更柔和低调
-    let lightGrad = ctx.createRadialGradient(mx, my, 0, mx, my, 250);
-    lightGrad.addColorStop(0, 'rgba(255, 255, 255, 0.3)'); // 调低 Alpha 使白光中心更灰暗柔和
-    lightGrad.addColorStop(0.5, 'rgba(120, 120, 120, 0.1)'); // 显著减弱过渡层感
+    let lightGrad = ctx.createRadialGradient(mx, my, 0, mx, my, RAD);
+    lightGrad.addColorStop(0, 'rgba(255, 255, 255, 0.1)'); // 极低亮度的中心
+    lightGrad.addColorStop(0.9, 'rgba(255, 255, 255, 0.05)'); 
     lightGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
     ctx.fillStyle = lightGrad;
     ctx.beginPath();
-    ctx.arc(mx, my, 250, 0, Math.PI*2);
+    ctx.arc(mx, my, RAD, 0, Math.PI*2);
     ctx.fill();
     ctx.globalCompositeOperation = 'source-over'; 
-
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.3)'; // 中心点同步显著降亮
-    ctx.beginPath();
-    ctx.arc(mx, my, 3, 0, Math.PI*2);
-    ctx.fill();
     
     // 顶层渲染：画文字、豁免黑幕的小人，和粒子散落（位于手电筒遮罩之上）
     for(let ent of entities) {
